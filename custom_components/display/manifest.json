@@ -1,0 +1,20 @@
+{
+  "domain": "display",
+  "name": "Display",
+  "codeowners": [
+    "@markfrancisonly"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "http",
+    "frontend"
+  ],
+  "documentation": "https://github.com/markfrancisonly/ha-display#readme",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/markfrancisonly/ha-display/issues",
+  "loggers": [
+    "custom_components.display"
+  ],
+  "requirements": [],
+  "version": "2.1.1"
+}
