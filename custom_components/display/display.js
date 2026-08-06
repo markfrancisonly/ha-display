@@ -64,19 +64,51 @@ function matrixEl() {
   return svg.querySelector("feColorMatrix");
 }
 
-function applyGains(gains) {
-  const [r, g, b] = gains;
-  const identity =
-    Math.abs(r - 1) < 0.002 && Math.abs(g - 1) < 0.002 && Math.abs(b - 1) < 0.002;
-  if (identity) {
-    document.body.style.removeProperty("filter");
-    return;
-  }
-  matrixEl().setAttribute(
-    "values",
-    `${r.toFixed(4)} 0 0 0 0  0 ${g.toFixed(4)} 0 0 0  0 0 ${b.toFixed(4)} 0 0  0 0 0 1 0`
+function isIdentity([r, g, b]) {
+  return (
+    Math.abs(r - 1) < 0.002 && Math.abs(g - 1) < 0.002 && Math.abs(b - 1) < 0.002
   );
-  document.body.style.filter = `url(#${FILTER_ID})`;
+}
+
+let lastGains = [1, 1, 1];
+let fsTinted = null;
+
+/* Native fullscreen renders in the top layer, which ignores ancestor filters —
+   the body filter never reaches it (untinted fullscreen camera). Re-apply the
+   correction on the fullscreened element itself. url(#id) is tree-scoped and
+   cannot cross shadow roots, so this path uses a self-contained data-URI
+   filter instead of the shared SVG. */
+function dataUriFilter([r, g, b]) {
+  const svg =
+    `<svg xmlns="${SVGNS}"><filter id="f" color-interpolation-filters="sRGB">` +
+    `<feColorMatrix type="matrix" values="${r.toFixed(4)} 0 0 0 0 0 ${g.toFixed(4)} 0 0 0 0 0 ${b.toFixed(4)} 0 0 0 0 0 1 0"/>` +
+    `</filter></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}#f")`;
+}
+
+function syncFullscreen() {
+  const fs =
+    document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
+  const want = fs && !isIdentity(lastGains) ? fs : null;
+  if (fsTinted && fsTinted !== want) fsTinted.style.removeProperty("filter");
+  fsTinted = want;
+  if (want) want.style.filter = dataUriFilter(lastGains);
+}
+document.addEventListener("fullscreenchange", syncFullscreen);
+document.addEventListener("webkitfullscreenchange", syncFullscreen);
+
+function applyGains(gains) {
+  lastGains = gains;
+  if (isIdentity(gains)) {
+    document.body.style.removeProperty("filter");
+  } else {
+    matrixEl().setAttribute(
+      "values",
+      `${gains[0].toFixed(4)} 0 0 0 0  0 ${gains[1].toFixed(4)} 0 0 0  0 0 ${gains[2].toFixed(4)} 0 0  0 0 0 1 0`
+    );
+    document.body.style.filter = `url(#${FILTER_ID})`;
+  }
+  syncFullscreen();
 }
 
 // bindings written by the number-entity era point at number.<x>_white_point;
