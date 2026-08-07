@@ -10,13 +10,15 @@
    On the bundled display-card every device picks the profile to bind to
    (stored in this browser's localStorage); no binding = native output.
 
-   Combined gains are computed server-side (the light's rgb_gain attribute)
-   and applied through an feColorMatrix backdrop-filter on a full-viewport
-   veil — a real recolor of every composited pixel, not an overlay blend.
-   Element filters (body or root) depend on the engine keeping promoted
-   compositing layers inside the filter's containing block, and the Android
-   WebView compositor lets the sidebar escape; the backdrop samples the final
-   composite, so nothing painted beneath the veil can escape it. */
+   The correction is computed server-side (the light's rgb_matrix/rgb_gain
+   attributes) and applied through an feColorMatrix filter on <body> — a real
+   recolor of every rendered pixel, not an overlay. body, NOT html: a filter
+   on the root element misses fixed/promoted compositing layers in Chromium
+   (the sidebar escaped it); on a non-root element the filter is a containing
+   block, so those layers paint inside it. Known limitation: the Android
+   WebView compositor can still promote the sidebar out of even the body
+   filter — a backdrop-filter veil was tried (2026-08-06) and did not catch
+   it either, so the simple standard mechanism stays. */
 
 const SVG_ID = "display-svg";
 const FILTER_ID = "display-filter";
@@ -85,95 +87,15 @@ function matrixValues(m) {
   );
 }
 
-let lastMatrix = IDENTITY9;
-let fsTinted = null;
-
-/* Native fullscreen renders in the top layer, above the veil — re-apply the
-   correction on the fullscreened element itself. url(#id) is tree-scoped and
-   cannot cross shadow roots, so this path uses a self-contained data-URI
-   filter instead of the shared SVG. */
-function dataUriFilter(m) {
-  const svg =
-    `<svg xmlns="${SVGNS}"><filter id="f" color-interpolation-filters="sRGB">` +
-    `<feColorMatrix type="matrix" values="${matrixValues(m)}"/>` +
-    `</filter></svg>`;
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}#f")`;
-}
-
-function syncFullscreen() {
-  let fs =
-    document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
-  // a fullscreened DOCUMENT (programmatic F11) still renders the veil —
-  // re-tinting it would double-apply the correction
-  if (fs && (fs === document.documentElement || fs.contains(document.body)))
-    fs = null;
-  const want = fs && !isIdentity(lastMatrix) ? fs : null;
-  if (fsTinted && fsTinted !== want) fsTinted.style.removeProperty("filter");
-  fsTinted = want;
-  if (want) want.style.filter = dataUriFilter(lastMatrix);
-}
-document.addEventListener("fullscreenchange", syncFullscreen);
-document.addEventListener("webkitfullscreenchange", syncFullscreen);
-
-/* The correction is a full-viewport VEIL with backdrop-filter, not an element
-   filter: backdrop-filter recolors the COMPOSITED backdrop, so every pixel
-   painted beneath it is corrected regardless of which layer painted it. An
-   element filter on <body> depends on the engine keeping promoted layers
-   inside the filter's containing block — the Android WebView compositor lets
-   the sidebar escape it (same bug class the old body-not-html comment
-   documented for the root element). pointer-events:none, max z-index: sits
-   above app overlays (babycam popup et al) so they are corrected too; only
-   top-layer content (native fullscreen) renders above it, and syncFullscreen
-   covers that. */
-const VEIL_ID = "display-veil";
-
-// WebKit never RENDERS SVG url() references in backdrop-filter — but it
-// PARSES them, so CSS.supports lies and this cannot be feature-detected.
-// Only Chromium-family engines composite SVG-reference backdrops; WebKit
-// falls back to the body element filter, which it renders fine and whose
-// promoted-layer escape is a Chromium/WebView problem.
-let _veilSupported = null;
-function veilSupported() {
-  if (_veilSupported === null) {
-    _veilSupported =
-      !!window.chrome || /Chrom(e|ium)\//.test(navigator.userAgent);
-  }
-  return _veilSupported;
-}
-
-function veilEl() {
-  let veil = document.getElementById(VEIL_ID);
-  if (!veil) {
-    veil = document.createElement("div");
-    veil.id = VEIL_ID;
-    veil.style.cssText =
-      "position:fixed;inset:0;z-index:2147483647;pointer-events:none;" +
-      `backdrop-filter:url(#${FILTER_ID});-webkit-backdrop-filter:url(#${FILTER_ID});`;
-    document.body.appendChild(veil);
-  }
-  return veil;
-}
-
-// An older copy of this script can still run from the service-worker-cached
-// app shell (extra_js_url era); it applies the same matrix as a BODY filter,
-// which doubles the correction under the veil — strip it whenever it
-// reappears. Only on veil engines: the WebKit fallback IS the body filter.
-new MutationObserver(() => {
-  if (veilSupported() && document.body.style.filter.includes(FILTER_ID))
-    document.body.style.removeProperty("filter");
-}).observe(document.body, { attributes: true, attributeFilter: ["style"] });
-
 function applyMatrix(m) {
-  lastMatrix = m;
   if (isIdentity(m)) {
-    document.getElementById(VEIL_ID)?.remove();
     document.body.style.removeProperty("filter");
   } else {
     matrixEl().setAttribute("values", matrixValues(m));
-    if (veilSupported()) veilEl();
-    else document.body.style.filter = `url(#${FILTER_ID})`;
+    document.body.style.filter = `url(#${FILTER_ID})`;
   }
-  syncFullscreen();
+  // a veil-era copy of this script may have left its overlay behind
+  document.getElementById("display-veil")?.remove();
 }
 
 // bindings written by the number-entity era point at number.<x>_white_point;
