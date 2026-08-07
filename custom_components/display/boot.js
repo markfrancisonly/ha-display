@@ -7,6 +7,12 @@
    matrix the main module cached in localStorage. */
 (() => {
   try {
+    // iOS is unsupported (renders native) — see display.js
+    if (
+      /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+      (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
+    )
+      return;
     const m = JSON.parse(localStorage.getItem("display_matrix") || "null");
     if (!Array.isArray(m) || m.length !== 9) return;
     const I = [1, 0, 0, 0, 1, 0, 0, 0, 1];
