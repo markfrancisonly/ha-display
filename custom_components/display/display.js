@@ -209,12 +209,20 @@ function applyMatrix(m) {
 
 const MATRIX_CACHE_KEY = "display_matrix";
 
+// hands the first-paint duty back from boot.js
+window.__displayLive = true;
+
 // the last correction is cached per browser so it applies at FIRST PAINT,
 // before the backend connection is even up; the live state re-applies over it
 try {
   const cached = JSON.parse(localStorage.getItem(MATRIX_CACHE_KEY) || "null");
   if (Array.isArray(cached) && cached.length === 9) applyMatrix(cached);
 } catch (e) {}
+
+// the frontend boot (and themes) can clear body inline styles — re-assert
+new MutationObserver(() => {
+  if (!isIdentity(lastMatrix) && !document.body.style.filter) applyMatrix(lastMatrix);
+}).observe(document.body, { attributes: true, attributeFilter: ["style"] });
 
 // bindings written by the number-entity era point at number.<x>_white_point;
 // rewrite them to the profile's light entity once it is seen

@@ -18,10 +18,7 @@
       `${f(m[3])} ${f(m[4])} ${f(m[5])} 0 0  ` +
       `${f(m[6])} ${f(m[7])} ${f(m[8])} 0 0  0 0 0 1 0`;
     const put = () => {
-      if (!document.body) {
-        setTimeout(put, 5);
-        return;
-      }
+      if (!document.body) return;
       if (!document.getElementById("display-svg")) {
         const svg = document.createElementNS(NS, "svg");
         svg.id = "display-svg";
@@ -38,8 +35,18 @@
         svg.appendChild(filter);
         document.body.appendChild(svg);
       }
-      document.body.style.filter = "url(#display-filter)";
+      if (!document.body.style.filter)
+        document.body.style.filter = "url(#display-filter)";
     };
-    put();
+    // The frontend boot can clear body inline styles after a one-shot apply,
+    // leaving the page bare until the main module loads (slow on phones) —
+    // keep re-asserting until the module (window.__displayLive) takes over.
+    let n = 0;
+    const tick = () => {
+      if (window.__displayLive || n++ > 100) return;
+      put();
+      setTimeout(tick, 150);
+    };
+    tick();
   } catch (e) {}
 })();
