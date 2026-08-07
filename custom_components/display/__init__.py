@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from aiohttp import web
 
+from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -46,6 +47,13 @@ class DisplayScriptView(HomeAssistantView):
         return web.FileResponse(
             self._path, headers={"Cache-Control": "no-cache"}
         )
+
+
+class BootScriptView(DisplayScriptView):
+    """The frozen first-paint shim (see boot.js)."""
+
+    url = "/display/boot.js"
+    name = "display:boot"
 
 
 async def _async_register_resource(hass: HomeAssistant, version: str) -> None:
@@ -86,6 +94,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.config.path("custom_components/display/display.js")
             )
         )
+        hass.http.register_view(
+            BootScriptView(hass.config.path("custom_components/display/boot.js"))
+        )
+        # extra_js_url = part of the app shell = runs at logo time. The shell
+        # (and this URL) may be served stale by the service worker, which is
+        # fine: boot.js is frozen and only replays the cached matrix.
+        add_extra_js_url(hass, "/display/boot.js")
 
         async def register_script(hass: HomeAssistant, _component: str) -> None:
             await _async_register_resource(hass, integration.version)
