@@ -84,26 +84,34 @@ def _srgb_to_linear(c: float) -> float:
     return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
 
-def rgb_matrix(kelvin: float) -> list[float]:
-    """Row-major 3x3 Bradford adaptation from 6500 K to ``kelvin``.
+def adaptation_matrix(white: tuple[float, float, float]) -> list[float]:
+    """Row-major 3x3 Bradford adaptation toward the target ``white``.
 
-    Rows are rescaled so WHITE renders exactly as rgb_gains() always has —
+    ``white`` is the gamma-encoded RGB the display's white should render as
+    (peak-normalized, attenuation only) — from the blackbody locus for a
+    kelvin white point, or anywhere in the gamut for an hs tint. Rows are
+    rescaled so WHITE renders exactly as the diagonal gains always have —
     neutrals are unchanged from the diagonal era; only saturated colors get
-    the channel mixing that keeps hues tracking at deep warmth. The matrix
-    is applied to gamma-encoded values (display-LUT semantics), matching how
-    the gains have always been applied.
+    the channel mixing that keeps hues tracking. A zero target channel zeroes
+    its row (degenerates to the diagonal behavior). The matrix is applied to
+    gamma-encoded values (display-LUT semantics), matching how the gains have
+    always been applied.
     """
-    gains = rgb_gains(kelvin)
-    w_lin = [_srgb_to_linear(g) for g in gains]
+    w_lin = [_srgb_to_linear(g) for g in white]
     src = _mat_vec(_BRADFORD, _mat_vec(_RGB2XYZ, (1.0, 1.0, 1.0)))
     dst = _mat_vec(_BRADFORD, _mat_vec(_RGB2XYZ, w_lin))
-    scale = [d / s for d, s in zip(dst, src)]
+    scale = [d / s if abs(s) > 1e-9 else 0.0 for d, s in zip(dst, src)]
     a_scaled = [[_BRADFORD[i][j] * scale[i] for j in range(3)] for i in range(3)]
     cat = _mat_mul(_BRADFORD_INV, a_scaled)
     m = _mat_mul(_XYZ2RGB, _mat_mul(cat, _RGB2XYZ))
     flat = []
     for i in range(3):
         row_white = sum(m[i])
-        k = gains[i] / row_white if row_white > 1e-6 else 0.0
+        k = white[i] / row_white if abs(row_white) > 1e-6 else 0.0
         flat.extend(round(x * k, 4) for x in m[i])
     return flat
+
+
+def rgb_matrix(kelvin: float) -> list[float]:
+    """Bradford adaptation from 6500 K to ``kelvin`` (blackbody white)."""
+    return adaptation_matrix(rgb_gains(kelvin))
