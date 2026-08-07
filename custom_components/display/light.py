@@ -15,13 +15,14 @@ from homeassistant.helpers.restore_state import RestoreEntity, RestoredExtraData
 
 from .const import (
     ATTR_RGB_GAIN,
+    ATTR_RGB_MATRIX,
     CONF_NAME,
     DEFAULT_KELVIN,
     DOMAIN,
     MAX_KELVIN,
     MIN_KELVIN,
 )
-from .helpers import rgb_gains
+from .helpers import rgb_gains, rgb_matrix
 
 
 async def async_setup_entry(hass, entry: ConfigEntry, async_add_entities):
@@ -96,9 +97,23 @@ class DisplayLight(RestoreEntity, LightEntity):
             base = rgb_gains(self._kelvin)
         return [round(c * factor, 4) for c in base]
 
+    def _matrix(self) -> list[float]:
+        # Kelvin gets the full Bradford adaptation (hues track at deep
+        # warmth); an hs tint is artistic and stays a plain channel scale.
+        if not self._on:
+            return [0.0] * 9
+        factor = self._brightness / 255.0
+        if self._mode is ColorMode.HS and self._hs[1] > 0:
+            r, g, b = colorsys.hsv_to_rgb(self._hs[0] / 360.0, self._hs[1] / 100.0, 1.0)
+            m = [r, 0.0, 0.0, 0.0, g, 0.0, 0.0, 0.0, b]
+        else:
+            m = rgb_matrix(self._kelvin)
+        return [round(v * factor, 4) for v in m]
+
     @property
     def extra_state_attributes(self) -> dict:
-        return {ATTR_RGB_GAIN: self._gains()}
+        # rgb_gain stays for bound clients running older display.js
+        return {ATTR_RGB_GAIN: self._gains(), ATTR_RGB_MATRIX: self._matrix()}
 
     @property
     def extra_restore_state_data(self) -> RestoredExtraData:

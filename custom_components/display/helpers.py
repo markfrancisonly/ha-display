@@ -39,3 +39,71 @@ def rgb_gains(kelvin: float) -> tuple[float, float, float]:
     peak = max(gains)
     r, g, b = (round(x / peak, 4) for x in gains)
     return r, g, b
+
+
+# --- Bradford chromatic adaptation ---------------------------------------
+# Diagonal gains can only scale channels; at deep warmth that flips
+# cyan-ish blues to green (B crushed, G kept). A full 3x3 adaptation mixes
+# channels the way perception does, so hues track: blues dim toward
+# violet-grey instead. Same feColorMatrix, same per-pixel cost.
+
+_RGB2XYZ = (
+    (0.4124564, 0.3575761, 0.1804375),
+    (0.2126729, 0.7151522, 0.0721750),
+    (0.0193339, 0.1191920, 0.9503041),
+)
+_XYZ2RGB = (
+    (3.2404542, -1.5371385, -0.4985314),
+    (-0.9692660, 1.8760108, 0.0415560),
+    (0.0556434, -0.2040259, 1.0572252),
+)
+_BRADFORD = (
+    (0.8951, 0.2664, -0.1614),
+    (-0.7502, 1.7135, 0.0367),
+    (0.0389, -0.0685, 1.0296),
+)
+_BRADFORD_INV = (
+    (0.9869929, -0.1470543, 0.1599627),
+    (0.4323053, 0.5183603, 0.0492912),
+    (-0.0085287, 0.0400428, 0.9684867),
+)
+
+
+def _mat_mul(a, b):
+    return [
+        [sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)]
+        for i in range(3)
+    ]
+
+
+def _mat_vec(m, v):
+    return [sum(m[i][k] * v[k] for k in range(3)) for i in range(3)]
+
+
+def _srgb_to_linear(c: float) -> float:
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def rgb_matrix(kelvin: float) -> list[float]:
+    """Row-major 3x3 Bradford adaptation from 6500 K to ``kelvin``.
+
+    Rows are rescaled so WHITE renders exactly as rgb_gains() always has —
+    neutrals are unchanged from the diagonal era; only saturated colors get
+    the channel mixing that keeps hues tracking at deep warmth. The matrix
+    is applied to gamma-encoded values (display-LUT semantics), matching how
+    the gains have always been applied.
+    """
+    gains = rgb_gains(kelvin)
+    w_lin = [_srgb_to_linear(g) for g in gains]
+    src = _mat_vec(_BRADFORD, _mat_vec(_RGB2XYZ, (1.0, 1.0, 1.0)))
+    dst = _mat_vec(_BRADFORD, _mat_vec(_RGB2XYZ, w_lin))
+    scale = [d / s for d, s in zip(dst, src)]
+    a_scaled = [[_BRADFORD[i][j] * scale[i] for j in range(3)] for i in range(3)]
+    cat = _mat_mul(_BRADFORD_INV, a_scaled)
+    m = _mat_mul(_XYZ2RGB, _mat_mul(cat, _RGB2XYZ))
+    flat = []
+    for i in range(3):
+        row_white = sum(m[i])
+        k = gains[i] / row_white if row_white > 1e-6 else 0.0
+        flat.extend(round(x * k, 4) for x in m[i])
+    return flat

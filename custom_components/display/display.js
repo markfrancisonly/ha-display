@@ -65,24 +65,37 @@ function matrixEl() {
   return svg.querySelector("feColorMatrix");
 }
 
-function isIdentity([r, g, b]) {
+const IDENTITY9 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+
+function diagonal([r, g, b]) {
+  return [r, 0, 0, 0, g, 0, 0, 0, b];
+}
+
+function isIdentity(m) {
+  return m.every((v, i) => Math.abs(v - IDENTITY9[i]) < 0.002);
+}
+
+// 3x3 row-major -> feColorMatrix 5x4 values
+function matrixValues(m) {
+  const f = (v) => v.toFixed(4);
   return (
-    Math.abs(r - 1) < 0.002 && Math.abs(g - 1) < 0.002 && Math.abs(b - 1) < 0.002
+    `${f(m[0])} ${f(m[1])} ${f(m[2])} 0 0  ` +
+    `${f(m[3])} ${f(m[4])} ${f(m[5])} 0 0  ` +
+    `${f(m[6])} ${f(m[7])} ${f(m[8])} 0 0  0 0 0 1 0`
   );
 }
 
-let lastGains = [1, 1, 1];
+let lastMatrix = IDENTITY9;
 let fsTinted = null;
 
-/* Native fullscreen renders in the top layer, which ignores ancestor filters —
-   the body filter never reaches it (untinted fullscreen camera). Re-apply the
+/* Native fullscreen renders in the top layer, above the veil — re-apply the
    correction on the fullscreened element itself. url(#id) is tree-scoped and
    cannot cross shadow roots, so this path uses a self-contained data-URI
    filter instead of the shared SVG. */
-function dataUriFilter([r, g, b]) {
+function dataUriFilter(m) {
   const svg =
     `<svg xmlns="${SVGNS}"><filter id="f" color-interpolation-filters="sRGB">` +
-    `<feColorMatrix type="matrix" values="${r.toFixed(4)} 0 0 0 0 0 ${g.toFixed(4)} 0 0 0 0 0 ${b.toFixed(4)} 0 0 0 0 0 1 0"/>` +
+    `<feColorMatrix type="matrix" values="${matrixValues(m)}"/>` +
     `</filter></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}#f")`;
 }
@@ -90,14 +103,14 @@ function dataUriFilter([r, g, b]) {
 function syncFullscreen() {
   let fs =
     document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
-  // a fullscreened DOCUMENT (programmatic F11) still contains the filtered
-  // body — re-tinting it would double-apply the correction
+  // a fullscreened DOCUMENT (programmatic F11) still renders the veil —
+  // re-tinting it would double-apply the correction
   if (fs && (fs === document.documentElement || fs.contains(document.body)))
     fs = null;
-  const want = fs && !isIdentity(lastGains) ? fs : null;
+  const want = fs && !isIdentity(lastMatrix) ? fs : null;
   if (fsTinted && fsTinted !== want) fsTinted.style.removeProperty("filter");
   fsTinted = want;
-  if (want) want.style.filter = dataUriFilter(lastGains);
+  if (want) want.style.filter = dataUriFilter(lastMatrix);
 }
 document.addEventListener("fullscreenchange", syncFullscreen);
 document.addEventListener("webkitfullscreenchange", syncFullscreen);
@@ -136,15 +149,12 @@ new MutationObserver(() => {
     document.body.style.removeProperty("filter");
 }).observe(document.body, { attributes: true, attributeFilter: ["style"] });
 
-function applyGains(gains) {
-  lastGains = gains;
-  if (isIdentity(gains)) {
+function applyMatrix(m) {
+  lastMatrix = m;
+  if (isIdentity(m)) {
     document.getElementById(VEIL_ID)?.remove();
   } else {
-    matrixEl().setAttribute(
-      "values",
-      `${gains[0].toFixed(4)} 0 0 0 0  0 ${gains[1].toFixed(4)} 0 0 0  0 0 ${gains[2].toFixed(4)} 0 0  0 0 0 1 0`
-    );
+    matrixEl().setAttribute("values", matrixValues(m));
     veilEl();
   }
   syncFullscreen();
@@ -165,7 +175,7 @@ function recompute() {
   migrateBinding();
   const id = storedProfile();
   const bound = id ? entities.get(id) : null;
-  applyGains(bound ? bound.gains : [1, 1, 1]);
+  applyMatrix(bound ? bound.matrix : IDENTITY9);
 }
 
 function consider(state) {
@@ -174,7 +184,12 @@ function consider(state) {
     return entities.delete(state.entity_id);
   }
   entities.set(state.entity_id, {
-    gains: a.rgb_gain.map(Number),
+    // full Bradford matrix when the backend provides it; older backends
+    // fall back to the diagonal gains
+    matrix:
+      Array.isArray(a.rgb_matrix) && a.rgb_matrix.length === 9
+        ? a.rgb_matrix.map(Number)
+        : diagonal(a.rgb_gain.map(Number)),
     on: state.state === "on",
     kelvin: a.color_temp_kelvin ? Math.round(a.color_temp_kelvin) : null,
     brightness: a.brightness ? Math.round((a.brightness / 255) * 100) : null,
