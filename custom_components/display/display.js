@@ -95,6 +95,8 @@ const IS_IOS =
 // iOS is UNSUPPORTED (2026-08-07): WKWebView promotes fixed chrome out of
 // every page-level filter, clears body styles during its slow boot, and the
 // partial result was worse than none — iOS renders native.
+// If a future WebView stops promoting the sidebar out of the body filter,
+// this double-applies (sidebar renders extra-warm) — disable it then.
 const CHROME_FIX = /Android/.test(navigator.userAgent) ? "android" : null;
 
 const SCOPED_ID = "display-scoped";
