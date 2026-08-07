@@ -22,7 +22,7 @@ from .const import (
     MAX_KELVIN,
     MIN_KELVIN,
 )
-from .helpers import adaptation_matrix, rgb_gains, rgb_matrix
+from .helpers import adaptation_matrix, rgb_gains
 
 
 async def async_setup_entry(hass, entry: ConfigEntry, async_add_entities):
@@ -98,8 +98,9 @@ class DisplayLight(RestoreEntity, LightEntity):
         return [round(c * factor, 4) for c in base]
 
     def _matrix(self) -> list[float]:
-        # Both modes are white-point adaptation — kelvin picks the target
-        # white from the blackbody locus, hs picks it freely.
+        # EXPERIMENT 2026-08-06: kelvin back on plain diagonal gains (the
+        # Bradford kelvin ramp read green to the eye); hs tints keep the full
+        # Bradford adaptation. May flip again — both paths are one line here.
         if not self._on:
             return [0.0] * 9
         factor = self._brightness / 255.0
@@ -108,7 +109,8 @@ class DisplayLight(RestoreEntity, LightEntity):
                 colorsys.hsv_to_rgb(self._hs[0] / 360.0, self._hs[1] / 100.0, 1.0)
             )
         else:
-            m = rgb_matrix(self._kelvin)
+            g = rgb_gains(self._kelvin)
+            m = [g[0], 0.0, 0.0, 0.0, g[1], 0.0, 0.0, 0.0, g[2]]
         return [round(v * factor, 4) for v in m]
 
     @property
