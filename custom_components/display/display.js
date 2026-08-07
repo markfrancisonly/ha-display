@@ -127,6 +127,15 @@ function veilEl() {
   return veil;
 }
 
+// An older copy of this script can still run from the service-worker-cached
+// app shell (extra_js_url era); it applies the same matrix as a BODY filter,
+// which doubles the correction under the veil — strip it whenever it
+// reappears.
+new MutationObserver(() => {
+  if (document.body.style.filter.includes(FILTER_ID))
+    document.body.style.removeProperty("filter");
+}).observe(document.body, { attributes: true, attributeFilter: ["style"] });
+
 function applyGains(gains) {
   lastGains = gains;
   if (isIdentity(gains)) {
