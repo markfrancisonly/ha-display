@@ -11,11 +11,12 @@
    (stored in this browser's localStorage); no binding = native output.
 
    Combined gains are computed server-side (the light's rgb_gain attribute)
-   and applied through an feColorMatrix filter on <body> — a real recolor of
-   every rendered pixel, not an overlay. body, NOT html: a filter on the
-   root element misses fixed/promoted compositing layers in Chromium (the
-   sidebar escaped it); on a non-root element the filter is a containing
-   block, so those layers paint inside it. */
+   and applied through an feColorMatrix backdrop-filter on a full-viewport
+   veil — a real recolor of every composited pixel, not an overlay blend.
+   Element filters (body or root) depend on the engine keeping promoted
+   compositing layers inside the filter's containing block, and the Android
+   WebView compositor lets the sidebar escape; the backdrop samples the final
+   composite, so nothing painted beneath the veil can escape it. */
 
 const SVG_ID = "display-svg";
 const FILTER_ID = "display-filter";
@@ -101,16 +102,41 @@ function syncFullscreen() {
 document.addEventListener("fullscreenchange", syncFullscreen);
 document.addEventListener("webkitfullscreenchange", syncFullscreen);
 
+/* The correction is a full-viewport VEIL with backdrop-filter, not an element
+   filter: backdrop-filter recolors the COMPOSITED backdrop, so every pixel
+   painted beneath it is corrected regardless of which layer painted it. An
+   element filter on <body> depends on the engine keeping promoted layers
+   inside the filter's containing block — the Android WebView compositor lets
+   the sidebar escape it (same bug class the old body-not-html comment
+   documented for the root element). pointer-events:none, max z-index: sits
+   above app overlays (babycam popup et al) so they are corrected too; only
+   top-layer content (native fullscreen) renders above it, and syncFullscreen
+   covers that. */
+const VEIL_ID = "display-veil";
+
+function veilEl() {
+  let veil = document.getElementById(VEIL_ID);
+  if (!veil) {
+    veil = document.createElement("div");
+    veil.id = VEIL_ID;
+    veil.style.cssText =
+      "position:fixed;inset:0;z-index:2147483647;pointer-events:none;" +
+      `backdrop-filter:url(#${FILTER_ID});-webkit-backdrop-filter:url(#${FILTER_ID});`;
+    document.body.appendChild(veil);
+  }
+  return veil;
+}
+
 function applyGains(gains) {
   lastGains = gains;
   if (isIdentity(gains)) {
-    document.body.style.removeProperty("filter");
+    document.getElementById(VEIL_ID)?.remove();
   } else {
     matrixEl().setAttribute(
       "values",
       `${gains[0].toFixed(4)} 0 0 0 0  0 ${gains[1].toFixed(4)} 0 0 0  0 0 ${gains[2].toFixed(4)} 0 0  0 0 0 1 0`
     );
-    document.body.style.filter = `url(#${FILTER_ID})`;
+    veilEl();
   }
   syncFullscreen();
 }
