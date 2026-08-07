@@ -128,14 +128,27 @@ function scopedFilter(root, m) {
   return `url(#${SCOPED_ID}-f)`;
 }
 
+// WebKit resolves url() on a SHADOW HOST against the host's own shadow tree,
+// so hosts are filtered via their rendered inner elements instead (all
+// non-empty children — e.g. card-mod injects zero-size style carriers).
+function filterTargets(el) {
+  if (!el) return [];
+  if (!el.shadowRoot) return [el];
+  const inner = [...el.shadowRoot.children].filter(
+    (c) =>
+      !/^(STYLE|LINK|SVG|TEMPLATE)$/.test(c.tagName) &&
+      (c.offsetWidth || c.offsetHeight)
+  );
+  return inner.length ? inner : [el];
+}
+
 function chromeTargets() {
   const out = [];
   const main = document
     .querySelector("home-assistant")
     ?.shadowRoot?.querySelector("home-assistant-main")?.shadowRoot;
   if (!main) return out;
-  const sidebar = main.querySelector("ha-sidebar");
-  if (sidebar) out.push(sidebar);
+  out.push(...filterTargets(main.querySelector("ha-sidebar")));
   if (CHROME_FIX === "ios") {
     const huiRoot = main
       .querySelector("partial-panel-resolver")
@@ -144,7 +157,7 @@ function chromeTargets() {
       huiRoot?.querySelector(".header") ||
       huiRoot?.querySelector("ha-top-app-bar-fixed") ||
       huiRoot?.querySelector("ha-header-bar");
-    if (header) out.push(header);
+    out.push(...filterTargets(header));
   }
   return out;
 }
@@ -165,7 +178,7 @@ function applyChrome(m) {
 }
 
 // panels remount on navigation, so the chrome set needs reconciling
-if (CHROME_FIX) setInterval(() => applyChrome(lastMatrix), 2000);
+if (CHROME_FIX) setInterval(() => applyChrome(lastMatrix), 1000);
 
 function applyMatrix(m) {
   lastMatrix = m;
