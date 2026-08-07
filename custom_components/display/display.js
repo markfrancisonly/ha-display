@@ -15,12 +15,11 @@
    recolor of every rendered pixel, not an overlay. body, NOT html: a filter
    on the root element misses fixed/promoted compositing layers in Chromium
    (the sidebar escaped it); on a non-root element the filter is a containing
-   block, so those layers paint inside it. Mobile WebView compositors promote
-   fixed chrome out of any page-level filter (Android WebView the sidebar,
-   iOS WKWebView the header AND sidebar; a backdrop-filter veil caught
-   neither and WebKit never renders SVG backdrops) — those elements get the
-   correction applied directly via per-shadow-root scoped filters, see
-   CHROME_FIX. boot.js replays the cached matrix at first paint. */
+   block, so those layers paint inside it. The Android WebView compositor
+   promotes the sidebar out of any page-level filter (a backdrop-filter veil
+   caught it no better) — it gets the correction applied directly via a
+   per-shadow-root scoped filter, see CHROME_FIX. boot.js replays the cached
+   matrix at first paint. iOS is unsupported: see the IS_IOS note. */
 
 const SVG_ID = "display-svg";
 const FILTER_ID = "display-filter";
@@ -89,17 +88,14 @@ function matrixValues(m) {
   );
 }
 
-/* Mobile WebViews composite fixed chrome outside any page-level filter —
-   Android WebView the sidebar, iOS WKWebView the header AND sidebar. Those
-   elements get the same correction applied DIRECTLY. UA-gated: contained
-   engines would double-apply. Selector walk mirrors lockdown.js. */
-const CHROME_FIX = (() => {
-  const ua = navigator.userAgent;
-  if (/iPhone|iPad|iPod/.test(ua)) return "ios";
-  if (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) return "ios"; // iPadOS
-  if (/Android/.test(ua)) return "android";
-  return null;
-})();
+const IS_IOS =
+  /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+  (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
+// iOS is UNSUPPORTED (2026-08-07): WKWebView promotes fixed chrome out of
+// every page-level filter, clears body styles during its slow boot, and the
+// partial result was worse than none — iOS renders native.
+const CHROME_FIX = /Android/.test(navigator.userAgent) ? "android" : null;
 
 const SCOPED_ID = "display-scoped";
 
@@ -112,9 +108,7 @@ const SCOPED_ID = "display-scoped";
    root's rendered top-level children, once each); the header is a nested
    div inside hui-root so it keeps a small selector list. */
 const SIDEBAR_SHEET = new CSSStyleSheet();
-const HEADER_SHEET = new CSSStyleSheet();
 const SIDEBAR_RULE = `:host > :not(style,link,svg,template){filter:url(#${SCOPED_ID}-f)}`;
-const HEADER_RULE = `.header,ha-top-app-bar-fixed,ha-header-bar{filter:url(#${SCOPED_ID}-f)}`;
 
 const chromeRoots = new Set();
 
@@ -145,19 +139,12 @@ function syncChrome() {
   if (!CHROME_FIX) return;
   const active = !isIdentity(lastMatrix);
   SIDEBAR_SHEET.replaceSync(active ? SIDEBAR_RULE : "");
-  HEADER_SHEET.replaceSync(active ? HEADER_RULE : "");
   if (!active) return;
   const main = document
     .querySelector("home-assistant")
     ?.shadowRoot?.querySelector("home-assistant-main")?.shadowRoot;
   const sidebarRoot = main?.querySelector("ha-sidebar")?.shadowRoot;
   if (sidebarRoot) ensureRoot(sidebarRoot, SIDEBAR_SHEET);
-  if (CHROME_FIX === "ios") {
-    const huiRoot = main
-      ?.querySelector("partial-panel-resolver")
-      ?.firstElementChild?.shadowRoot?.querySelector("hui-root")?.shadowRoot;
-    if (huiRoot) ensureRoot(huiRoot, HEADER_SHEET);
-  }
   const values = matrixValues(lastMatrix);
   for (const root of chromeRoots)
     root.querySelector(`#${SCOPED_ID} feColorMatrix`)?.setAttribute("values", values);
@@ -195,6 +182,7 @@ if (CHROME_FIX) {
 }
 
 function applyMatrix(m) {
+  if (IS_IOS) return;
   lastMatrix = m;
   if (isIdentity(m)) {
     document.body.style.removeProperty("filter");
