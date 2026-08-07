@@ -89,16 +89,105 @@ function matrixValues(m) {
   );
 }
 
+/* Mobile WebViews composite fixed chrome outside any page-level filter —
+   Android WebView the sidebar, iOS WKWebView the header AND sidebar. Those
+   elements get the same correction applied DIRECTLY (data-URI filter, so no
+   shadow-tree scope can break the reference). UA-gated: contained engines
+   would double-apply. Selector walk mirrors lockdown.js. */
+const CHROME_FIX = (() => {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua)) return "ios";
+  if (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) return "ios"; // iPadOS
+  if (/Android/.test(ua)) return "android";
+  return null;
+})();
+
+const SCOPED_ID = "display-scoped";
+
+// WebKit resolves url(#) strictly within the element's tree scope and does
+// not render external (data-URI) filter documents at all — so every shadow
+// root hosting corrected chrome gets its own copy of the filter definition.
+function scopedFilter(root, m) {
+  let svg = root.querySelector(`#${SCOPED_ID}`);
+  if (!svg) {
+    svg = document.createElementNS(SVGNS, "svg");
+    svg.id = SCOPED_ID;
+    svg.setAttribute("width", "0");
+    svg.setAttribute("height", "0");
+    svg.style.position = "fixed";
+    const filter = document.createElementNS(SVGNS, "filter");
+    filter.id = `${SCOPED_ID}-f`;
+    filter.setAttribute("color-interpolation-filters", "sRGB");
+    const fe = document.createElementNS(SVGNS, "feColorMatrix");
+    fe.setAttribute("type", "matrix");
+    filter.appendChild(fe);
+    svg.appendChild(filter);
+    root.appendChild(svg);
+  }
+  svg.querySelector("feColorMatrix").setAttribute("values", matrixValues(m));
+  return `url(#${SCOPED_ID}-f)`;
+}
+
+function chromeTargets() {
+  const out = [];
+  const main = document
+    .querySelector("home-assistant")
+    ?.shadowRoot?.querySelector("home-assistant-main")?.shadowRoot;
+  if (!main) return out;
+  const sidebar = main.querySelector("ha-sidebar");
+  if (sidebar) out.push(sidebar);
+  if (CHROME_FIX === "ios") {
+    const huiRoot = main
+      .querySelector("partial-panel-resolver")
+      ?.firstElementChild?.shadowRoot?.querySelector("hui-root")?.shadowRoot;
+    const header =
+      huiRoot?.querySelector(".header") ||
+      huiRoot?.querySelector("ha-top-app-bar-fixed") ||
+      huiRoot?.querySelector("ha-header-bar");
+    if (header) out.push(header);
+  }
+  return out;
+}
+
+let lastMatrix = IDENTITY9;
+let chromeTinted = new Set();
+
+function applyChrome(m) {
+  if (!CHROME_FIX) return;
+  const want = isIdentity(m) ? [] : chromeTargets();
+  for (const el of chromeTinted)
+    if (!want.includes(el)) el.style.removeProperty("filter");
+  chromeTinted = new Set(want);
+  for (const el of want) {
+    const url = scopedFilter(el.getRootNode(), m);
+    if (el.style.filter !== url) el.style.filter = url;
+  }
+}
+
+// panels remount on navigation, so the chrome set needs reconciling
+if (CHROME_FIX) setInterval(() => applyChrome(lastMatrix), 2000);
+
 function applyMatrix(m) {
+  lastMatrix = m;
   if (isIdentity(m)) {
     document.body.style.removeProperty("filter");
   } else {
     matrixEl().setAttribute("values", matrixValues(m));
     document.body.style.filter = `url(#${FILTER_ID})`;
   }
+  applyChrome(m);
   // a veil-era copy of this script may have left its overlay behind
   document.getElementById("display-veil")?.remove();
 }
+
+const MATRIX_CACHE_KEY = "display_matrix";
+
+// the last correction is cached per browser so it applies at FIRST PAINT,
+// before the backend connection is even up; the live state re-applies over it
+try {
+  const cached = JSON.parse(localStorage.getItem(MATRIX_CACHE_KEY) || "null");
+  if (Array.isArray(cached) && cached.length === 9) applyMatrix(cached);
+} catch (e) {}
 
 // bindings written by the number-entity era point at number.<x>_white_point;
 // rewrite them to the profile's light entity once it is seen
@@ -115,7 +204,11 @@ function recompute() {
   migrateBinding();
   const id = storedProfile();
   const bound = id ? entities.get(id) : null;
-  applyMatrix(bound ? bound.matrix : IDENTITY9);
+  const m = bound ? bound.matrix : IDENTITY9;
+  try {
+    localStorage.setItem(MATRIX_CACHE_KEY, JSON.stringify(m));
+  } catch (e) {}
+  applyMatrix(m);
 }
 
 function consider(state) {
