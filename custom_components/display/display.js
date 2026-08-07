@@ -15,10 +15,12 @@
    recolor of every rendered pixel, not an overlay. body, NOT html: a filter
    on the root element misses fixed/promoted compositing layers in Chromium
    (the sidebar escaped it); on a non-root element the filter is a containing
-   block, so those layers paint inside it. Known limitation: the Android
-   WebView compositor can still promote the sidebar out of even the body
-   filter — a backdrop-filter veil was tried (2026-08-06) and did not catch
-   it either, so the simple standard mechanism stays. */
+   block, so those layers paint inside it. Known limitations (2026-08-06,
+   accepted): mobile WebView compositors promote fixed chrome out of any
+   page-level filter — Android WebView the sidebar, iOS WKWebView the header
+   AND sidebar. A backdrop-filter veil caught neither (and WebKit never
+   renders SVG backdrops), and desktop engines don't reproduce it, so the
+   simple standard mechanism stays. */
 
 const SVG_ID = "display-svg";
 const FILTER_ID = "display-filter";
