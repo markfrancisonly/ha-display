@@ -87,8 +87,12 @@ function dataUriFilter([r, g, b]) {
 }
 
 function syncFullscreen() {
-  const fs =
+  let fs =
     document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
+  // a fullscreened DOCUMENT (programmatic F11) still contains the filtered
+  // body — re-tinting it would double-apply the correction
+  if (fs && (fs === document.documentElement || fs.contains(document.body)))
+    fs = null;
   const want = fs && !isIdentity(lastGains) ? fs : null;
   if (fsTinted && fsTinted !== want) fsTinted.style.removeProperty("filter");
   fsTinted = want;
