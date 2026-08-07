@@ -127,6 +127,20 @@ document.addEventListener("webkitfullscreenchange", syncFullscreen);
    covers that. */
 const VEIL_ID = "display-veil";
 
+// WebKit never RENDERS SVG url() references in backdrop-filter — but it
+// PARSES them, so CSS.supports lies and this cannot be feature-detected.
+// Only Chromium-family engines composite SVG-reference backdrops; WebKit
+// falls back to the body element filter, which it renders fine and whose
+// promoted-layer escape is a Chromium/WebView problem.
+let _veilSupported = null;
+function veilSupported() {
+  if (_veilSupported === null) {
+    _veilSupported =
+      !!window.chrome || /Chrom(e|ium)\//.test(navigator.userAgent);
+  }
+  return _veilSupported;
+}
+
 function veilEl() {
   let veil = document.getElementById(VEIL_ID);
   if (!veil) {
@@ -143,9 +157,9 @@ function veilEl() {
 // An older copy of this script can still run from the service-worker-cached
 // app shell (extra_js_url era); it applies the same matrix as a BODY filter,
 // which doubles the correction under the veil — strip it whenever it
-// reappears.
+// reappears. Only on veil engines: the WebKit fallback IS the body filter.
 new MutationObserver(() => {
-  if (document.body.style.filter.includes(FILTER_ID))
+  if (veilSupported() && document.body.style.filter.includes(FILTER_ID))
     document.body.style.removeProperty("filter");
 }).observe(document.body, { attributes: true, attributeFilter: ["style"] });
 
@@ -153,9 +167,11 @@ function applyMatrix(m) {
   lastMatrix = m;
   if (isIdentity(m)) {
     document.getElementById(VEIL_ID)?.remove();
+    document.body.style.removeProperty("filter");
   } else {
     matrixEl().setAttribute("values", matrixValues(m));
-    veilEl();
+    if (veilSupported()) veilEl();
+    else document.body.style.filter = `url(#${FILTER_ID})`;
   }
   syncFullscreen();
 }
