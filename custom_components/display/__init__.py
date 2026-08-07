@@ -10,14 +10,18 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.loader import async_get_integration
+from homeassistant.setup import async_when_setup
 
 from .const import DOMAIN, FRONTEND_SCRIPT_URL
+
+import logging
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.LIGHT]
 DATA_FRONTEND_REGISTERED = "frontend_registered"
@@ -44,6 +48,35 @@ class DisplayScriptView(HomeAssistantView):
         )
 
 
+async def _async_register_resource(hass: HomeAssistant, version: str) -> None:
+    """Ensure a versioned lovelace resource entry for the module.
+
+    NOT extra_js_url: that list is baked into index.html, and the frontend's
+    service worker serves a CACHED app shell for navigations — clients keep
+    loading the old script URL (and its cached body) through every version
+    bump and restart. The lovelace resource list arrives over the websocket
+    fresh on every dashboard load, so a ?v change reliably delivers new code.
+    """
+    target = f"{FRONTEND_SCRIPT_URL}?v={version}"
+    lovelace = hass.data.get("lovelace")
+    resources = getattr(lovelace, "resources", None)
+    if resources is None or not hasattr(resources, "async_create_item"):
+        _LOGGER.warning("Lovelace resources unavailable; add '%s' as a module", target)
+        return
+    await resources.async_get_info()
+    for item in resources.async_items():
+        if item.get("url", "").split("?", 1)[0] != FRONTEND_SCRIPT_URL:
+            continue
+        if item["url"] != target:
+            await resources.async_update_item(
+                item["id"], {"res_type": "module", "url": target}
+            )
+            _LOGGER.info("Updated lovelace resource to %s", target)
+        return
+    await resources.async_create_item({"res_type": "module", "url": target})
+    _LOGGER.info("Registered lovelace resource %s", target)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data = hass.data.setdefault(DOMAIN, {})
     if not data.get(DATA_FRONTEND_REGISTERED):
@@ -53,7 +86,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.config.path("custom_components/display/display.js")
             )
         )
-        add_extra_js_url(hass, f"{FRONTEND_SCRIPT_URL}?{integration.version}")
+
+        async def register_script(hass: HomeAssistant, _component: str) -> None:
+            await _async_register_resource(hass, integration.version)
+
+        async_when_setup(hass, "lovelace", register_script)
         data[DATA_FRONTEND_REGISTERED] = True
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
