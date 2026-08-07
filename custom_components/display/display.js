@@ -15,12 +15,12 @@
    recolor of every rendered pixel, not an overlay. body, NOT html: a filter
    on the root element misses fixed/promoted compositing layers in Chromium
    (the sidebar escaped it); on a non-root element the filter is a containing
-   block, so those layers paint inside it. Known limitations (2026-08-06,
-   accepted): mobile WebView compositors promote fixed chrome out of any
-   page-level filter — Android WebView the sidebar, iOS WKWebView the header
-   AND sidebar. A backdrop-filter veil caught neither (and WebKit never
-   renders SVG backdrops), and desktop engines don't reproduce it, so the
-   simple standard mechanism stays. */
+   block, so those layers paint inside it. Mobile WebView compositors promote
+   fixed chrome out of any page-level filter (Android WebView the sidebar,
+   iOS WKWebView the header AND sidebar; a backdrop-filter veil caught
+   neither and WebKit never renders SVG backdrops) — those elements get the
+   correction applied directly via per-shadow-root scoped filters, see
+   CHROME_FIX. boot.js replays the cached matrix at first paint. */
 
 const SVG_ID = "display-svg";
 const FILTER_ID = "display-filter";
@@ -91,9 +91,8 @@ function matrixValues(m) {
 
 /* Mobile WebViews composite fixed chrome outside any page-level filter —
    Android WebView the sidebar, iOS WKWebView the header AND sidebar. Those
-   elements get the same correction applied DIRECTLY (data-URI filter, so no
-   shadow-tree scope can break the reference). UA-gated: contained engines
-   would double-apply. Selector walk mirrors lockdown.js. */
+   elements get the same correction applied DIRECTLY. UA-gated: contained
+   engines would double-apply. Selector walk mirrors lockdown.js. */
 const CHROME_FIX = (() => {
   const ua = navigator.userAgent;
   if (/iPhone|iPad|iPod/.test(ua)) return "ios";
