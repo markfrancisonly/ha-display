@@ -103,13 +103,26 @@ const CHROME_FIX = (() => {
 
 const SCOPED_ID = "display-scoped";
 
-// WebKit resolves url(#) strictly within the element's tree scope and does
-// not render external (data-URI) filter documents at all — so every shadow
-// root hosting corrected chrome gets its own copy of the filter definition.
-function scopedFilter(root, m) {
-  let svg = root.querySelector(`#${SCOPED_ID}`);
-  if (!svg) {
-    svg = document.createElementNS(SVGNS, "svg");
+/* Chrome injection. Each corrected root ADOPTS one static constructable
+   stylesheet and hosts its own copy of the SVG filter def — WebKit resolves
+   url(#) strictly per tree scope and renders no external filter documents,
+   and adopted sheets survive re-renders and style elements Lit creates
+   later, unlike inline styles. Matrix changes only rewrite feColorMatrix
+   values; the sheets never change. The sidebar rule is fully generic (the
+   root's rendered top-level children, once each); the header is a nested
+   div inside hui-root so it keeps a small selector list. */
+const SIDEBAR_SHEET = new CSSStyleSheet();
+const HEADER_SHEET = new CSSStyleSheet();
+const SIDEBAR_RULE = `:host > :not(style,link,svg,template){filter:url(#${SCOPED_ID}-f)}`;
+const HEADER_RULE = `.header,ha-top-app-bar-fixed,ha-header-bar{filter:url(#${SCOPED_ID}-f)}`;
+
+const chromeRoots = new Set();
+
+function ensureRoot(root, sheet) {
+  if (!root.adoptedStyleSheets.includes(sheet))
+    root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
+  if (!root.querySelector(`#${SCOPED_ID}`)) {
+    const svg = document.createElementNS(SVGNS, "svg");
     svg.id = SCOPED_ID;
     svg.setAttribute("width", "0");
     svg.setAttribute("height", "0");
@@ -123,61 +136,63 @@ function scopedFilter(root, m) {
     svg.appendChild(filter);
     root.appendChild(svg);
   }
-  svg.querySelector("feColorMatrix").setAttribute("values", matrixValues(m));
-  return `url(#${SCOPED_ID}-f)`;
-}
-
-// WebKit resolves url() on a SHADOW HOST against the host's own shadow tree,
-// so hosts are filtered via their rendered inner elements instead (all
-// non-empty children — e.g. card-mod injects zero-size style carriers).
-function filterTargets(el) {
-  if (!el) return [];
-  if (!el.shadowRoot) return [el];
-  const inner = [...el.shadowRoot.children].filter(
-    (c) =>
-      !/^(STYLE|LINK|SVG|TEMPLATE)$/.test(c.tagName) &&
-      (c.offsetWidth || c.offsetHeight)
-  );
-  return inner.length ? inner : [el];
-}
-
-function chromeTargets() {
-  const out = [];
-  const main = document
-    .querySelector("home-assistant")
-    ?.shadowRoot?.querySelector("home-assistant-main")?.shadowRoot;
-  if (!main) return out;
-  out.push(...filterTargets(main.querySelector("ha-sidebar")));
-  if (CHROME_FIX === "ios") {
-    const huiRoot = main
-      .querySelector("partial-panel-resolver")
-      ?.firstElementChild?.shadowRoot?.querySelector("hui-root")?.shadowRoot;
-    const header =
-      huiRoot?.querySelector(".header") ||
-      huiRoot?.querySelector("ha-top-app-bar-fixed") ||
-      huiRoot?.querySelector("ha-header-bar");
-    out.push(...filterTargets(header));
-  }
-  return out;
+  chromeRoots.add(root);
 }
 
 let lastMatrix = IDENTITY9;
-let chromeTinted = new Set();
 
-function applyChrome(m) {
+function syncChrome() {
   if (!CHROME_FIX) return;
-  const want = isIdentity(m) ? [] : chromeTargets();
-  for (const el of chromeTinted)
-    if (!want.includes(el)) el.style.removeProperty("filter");
-  chromeTinted = new Set(want);
-  for (const el of want) {
-    const url = scopedFilter(el.getRootNode(), m);
-    if (el.style.filter !== url) el.style.filter = url;
+  const active = !isIdentity(lastMatrix);
+  SIDEBAR_SHEET.replaceSync(active ? SIDEBAR_RULE : "");
+  HEADER_SHEET.replaceSync(active ? HEADER_RULE : "");
+  if (!active) return;
+  const main = document
+    .querySelector("home-assistant")
+    ?.shadowRoot?.querySelector("home-assistant-main")?.shadowRoot;
+  const sidebarRoot = main?.querySelector("ha-sidebar")?.shadowRoot;
+  if (sidebarRoot) ensureRoot(sidebarRoot, SIDEBAR_SHEET);
+  if (CHROME_FIX === "ios") {
+    const huiRoot = main
+      ?.querySelector("partial-panel-resolver")
+      ?.firstElementChild?.shadowRoot?.querySelector("hui-root")?.shadowRoot;
+    if (huiRoot) ensureRoot(huiRoot, HEADER_SHEET);
   }
+  const values = matrixValues(lastMatrix);
+  for (const root of chromeRoots)
+    root.querySelector(`#${SCOPED_ID} feColorMatrix`)?.setAttribute("values", values);
 }
 
-// panels remount on navigation, so the chrome set needs reconciling
-if (CHROME_FIX) setInterval(() => applyChrome(lastMatrix), 1000);
+// remounts (navigation replaces hui-root; login replaces main) arrive via a
+// debounced observer on the app subtree, with a slow belt tick
+let syncQueued = false;
+function queueSync() {
+  if (syncQueued || !CHROME_FIX) return;
+  syncQueued = true;
+  setTimeout(() => {
+    syncQueued = false;
+    syncChrome();
+  }, 100);
+}
+
+if (CHROME_FIX) {
+  let observed = null;
+  const observer = new MutationObserver(queueSync);
+  const watch = () => {
+    const main = document
+      .querySelector("home-assistant")
+      ?.shadowRoot?.querySelector("home-assistant-main")?.shadowRoot;
+    if (main && main !== observed) {
+      observer.disconnect();
+      observer.observe(main, { childList: true, subtree: true });
+      observed = main;
+      queueSync();
+    }
+  };
+  window.addEventListener("location-changed", queueSync);
+  setInterval(watch, 10000);
+  watch();
+}
 
 function applyMatrix(m) {
   lastMatrix = m;
@@ -187,7 +202,7 @@ function applyMatrix(m) {
     matrixEl().setAttribute("values", matrixValues(m));
     document.body.style.filter = `url(#${FILTER_ID})`;
   }
-  applyChrome(m);
+  syncChrome();
   // a veil-era copy of this script may have left its overlay behind
   document.getElementById("display-veil")?.remove();
 }
