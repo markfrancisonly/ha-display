@@ -33,9 +33,9 @@ Every device opts in per browser, and everything is tuned through a normal
 
 Gains are computed server-side (blackbody curve for color temp, HSV for
 tints, times brightness) and published as the light's `rgb_gain` attribute
-— the single ground truth devices apply. The frontend module (auto-loaded
-via `extra_module_url`, no Lovelace resource needed) applies them through
-an SVG `feColorMatrix` filter on `<body>`. That recolors every rendered
+— the single ground truth devices apply. The frontend module (a dashboard
+resource the integration adds itself) applies them through an SVG
+`feColorMatrix` filter on `<body>`. That recolors every rendered
 pixel — UI, images, camera streams — it is **not** a translucent overlay.
 Because gains only attenuate (nothing can exceed 100% without clipping
 white), going bluer dims red/green slightly and going warmer dims blue —
@@ -43,14 +43,42 @@ the same trade every software white-balance shift makes.
 
 ## Installation
 
-**HACS**: add this repository as a custom repository (category:
-Integration), install, restart Home Assistant.
+### HACS (Recommended)
 
-**Manual**: copy `custom_components/display/` into your config's
-`custom_components/`, restart Home Assistant.
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=markfrancisonly&repository=ha-display&category=integration)
 
-Then add the integration (Settings → Devices & Services → Add Integration
-→ Display) once per profile you want — a profile is just a name.
+Or manually add the custom repository:
+
+<details>
+<summary>Step-by-step HACS installation</summary>
+
+1. Open **HACS** in your Home Assistant dashboard
+2. Click the **⋮** menu (top right) → **Custom repositories**
+3. Add this URL and set the category to **Integration**, then click **Add**:
+   ```
+   https://github.com/markfrancisonly/ha-display
+   ```
+4. The repository now appears in the custom repositories list. Close the dialog.
+5. Back in HACS, search for **Display** and open the result
+6. Click **Download** (or **Install**) and confirm
+7. **Restart Home Assistant**
+
+</details>
+
+### Manual Installation
+
+1. Download `display.zip` from the [latest release](https://github.com/markfrancisonly/ha-display/releases)
+2. Extract it into `custom_components/display/` inside your HA config directory
+3. Restart Home Assistant
+
+### Setup
+
+Add the integration (Settings → Devices & Services → Add Integration →
+Display) once per profile you want — a profile is just a name.
+
+The frontend module is added to your dashboard resources automatically.
+Dashboards in YAML mode need it added by hand: `/display/display.js` as a
+JavaScript module.
 
 ## Usage
 
