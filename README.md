@@ -22,6 +22,9 @@ Every device opts in per browser, and everything is tuned through a normal
   with a dropdown (stored in that browser's localStorage, key
   `display_profile`). No binding = native output, always — an unbound
   device is never affected, not even by off.
+- A bound device whose profile isn't loaded (Home Assistant restarting, or
+  the profile deleted) keeps its last correction; pick Unbound on the card
+  for native output.
 - Tuning happens through the normal light UI — more-info dialog, tile
   cards, scenes, automations, voice — and adjusts every device bound to
   that profile, from anywhere.

@@ -228,8 +228,9 @@ function migrateBinding() {
 function recompute() {
   migrateBinding();
   const id = storedProfile();
-  const bound = id ? entities.get(id) : null;
-  const m = bound ? bound.matrix : IDENTITY9;
+  // a bound profile that isn't loaded (HA restarting) keeps the shown correction
+  if (id && !entities.has(id)) return;
+  const m = id ? entities.get(id).matrix : IDENTITY9;
   try {
     localStorage.setItem(MATRIX_CACHE_KEY, JSON.stringify(m));
   } catch (e) {}
@@ -280,27 +281,29 @@ try {
   localStorage.removeItem(LEGACY_PROFILE_KEY);
 } catch (e) {}
 
+// Follow the frontend's own copy of the states (the one cards get): no
+// subscription of our own, and it re-syncs itself after a reconnect. The
+// frontend replaces a state object when that entity changes.
 (async () => {
   const haEl = await waitFor(() => document.querySelector("home-assistant"));
-  const hass = await waitFor(() => haEl.hass);
-  const conn = hass.connection;
-
-  const refresh = async () => {
-    const states = await conn.sendMessagePromise({ type: "get_states" });
-    entities.clear();
-    for (const s of states) {
-      if (s.entity_id.startsWith("light.")) consider(s);
+  let seen = {};
+  const poll = () => {
+    const states = haEl.hass && haEl.hass.states;
+    if (!states || states === seen) return;
+    let changed = false;
+    for (const id of Object.keys(states)) {
+      if (id.startsWith("light.") && states[id] !== seen[id]) {
+        changed = consider(states[id]) || changed;
+      }
     }
-    recompute();
+    for (const id of entities.keys()) {
+      if (!states[id]) changed = entities.delete(id) || changed;
+    }
+    seen = states;
+    if (changed) recompute();
   };
-
-  await conn.subscribeEvents((ev) => {
-    const { entity_id: id, new_state: ns } = ev.data;
-    if (!id.startsWith("light.")) return;
-    if (ns ? consider(ns) : entities.delete(id)) recompute();
-  }, "state_changed");
-  conn.addEventListener("ready", refresh); // re-sync after a reconnect
-  await refresh();
+  setInterval(poll, 500);
+  poll();
 })();
 
 /* ---- the card: bind this device to a profile (tune via the light) ---- */
